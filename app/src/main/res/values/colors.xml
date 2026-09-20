@@ -6,4 +6,11 @@
     <color name="white">#FFFFFF</color>
     <color name="ink">#4A0B2C</color>
     <color name="overlay_bg">#F2FFFFFF</color>
+    <color name="card_blue">#EDF4FF</color>
+    <color name="circle_blue">#D8E8FF</color>
+    <color name="text_blue">#0056B3</color>
+    <color name="button_blue">#0066A3</color>
+    <color name="muted_grey">#888888</color>
+    <color name="light_grey_bg">#F9FAFB</color>
+    <color name="dark_text">#333333</color>
 </resources>
