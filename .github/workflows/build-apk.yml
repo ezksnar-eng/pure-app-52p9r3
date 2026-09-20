@@ -26,9 +26,9 @@ jobs:
         run: |
           if [ -f gradlew ]; then
             chmod +x gradlew
-            ./gradlew assembleDebug --no-daemon --console=plain
+            ./gradlew -I pure-init.gradle assembleDebug --no-daemon --console=plain
           else
-            gradle assembleDebug --no-daemon --console=plain
+            gradle -I pure-init.gradle assembleDebug --no-daemon --console=plain
           fi
       - name: Collect APK
         run: |
