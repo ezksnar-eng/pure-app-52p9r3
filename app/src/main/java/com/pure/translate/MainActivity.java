@@ -8,13 +8,14 @@ import android.os.Build;
 import android.os.Bundle;
 import android.provider.Settings;
 import android.widget.Button;
+import android.widget.TextView;
 import android.widget.Toast;
 
 /**
- * الشاشة الرئيسية - كل وظيفتها إنها تاخذ صلاحيتين بس:
- * 1) صلاحية النافذة العائمة (Overlay) عشان الفقاعة تكدر تطلع فوق أي تطبيق.
- * 2) صلاحية تسجيل الشاشة (Screen Capture) عشان الخدمة تكدر تقرأ اللي موجود بالشاشة وتترجمه.
- * بعد أخذ الصلاحيتين، تشغل OverlayService وتقفل نفسها - كل الشغل الحقيقي يصير بالخدمة.
+ * الشاشة الرئيسية - زر واحد بس "بدء الترجمة".
+ * يضغط عليه المستخدم مرة وحدة، والتطبيق يسلسل الصلاحيتين لحاله:
+ * أول يطلب صلاحية النافذة العائمة (لو ناقصة)، وبعد ما يرجع منها يطلب صلاحية تسجيل الشاشة تلقائياً،
+ * وبعدها يشغل الخدمة ويسكر نفسه. ما يحتاج المستخدم يضغط زرين.
  */
 public class MainActivity extends Activity {
 
@@ -22,6 +23,7 @@ public class MainActivity extends Activity {
     private static final int REQ_CAPTURE = 1002;
 
     private MediaProjectionManager projectionManager;
+    private TextView statusText;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -29,50 +31,56 @@ public class MainActivity extends Activity {
         setContentView(R.layout.activity_main);
 
         projectionManager = (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
+        statusText = findViewById(R.id.statusText);
 
-        Button btnGrantOverlay = findViewById(R.id.btnGrantOverlay);
         Button btnStart = findViewById(R.id.btnStart);
-
-        btnGrantOverlay.setOnClickListener(v -> requestOverlayPermission());
-        btnStart.setOnClickListener(v -> requestScreenCapture());
+        btnStart.setOnClickListener(v -> startFlow());
     }
 
-    private void requestOverlayPermission() {
+    private void startFlow() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
+            statusText.setText("الخطوة ١ من ٢: فعّل صلاحية النافذة العائمة ثم ارجع");
             Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                     Uri.parse("package:" + getPackageName()));
             startActivityForResult(intent, REQ_OVERLAY);
         } else {
-            Toast.makeText(this, "صلاحية النافذة العائمة مفعّلة أصلاً", Toast.LENGTH_SHORT).show();
+            requestScreenCapture();
         }
     }
 
     private void requestScreenCapture() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
-            Toast.makeText(this, "لازم أول تفعّل صلاحية النافذة العائمة", Toast.LENGTH_SHORT).show();
-            return;
-        }
+        statusText.setText("الخطوة ٢ من ٢: وافق على تسجيل الشاشة عشان الترجمة تشتغل");
         startActivityForResult(projectionManager.createScreenCaptureIntent(), REQ_CAPTURE);
     }
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == REQ_CAPTURE && resultCode == Activity.RESULT_OK && data != null) {
-            // نبدي الخدمة ونمررلها صلاحية تسجيل الشاشة - من هسه الخدمة تشتغل لحالها
-            // وما يحتاج تفتح التطبيق مرة ثانية إلى إذا كفلت الخدمة يدوياً.
-            Intent serviceIntent = new Intent(this, OverlayService.class);
-            serviceIntent.putExtra("resultCode", resultCode);
-            serviceIntent.putExtra("data", data);
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(serviceIntent);
+
+        if (requestCode == REQ_OVERLAY) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && Settings.canDrawOverlays(this)) {
+                requestScreenCapture();
             } else {
-                startService(serviceIntent);
+                statusText.setText("لازم توافق على صلاحية النافذة العائمة عشان نكمل");
             }
-            Toast.makeText(this, "بدأت نافذة بيور - اضغط هوم وشوفها فوق أي تطبيق", Toast.LENGTH_LONG).show();
-            finish();
-        } else if (requestCode == REQ_CAPTURE) {
-            Toast.makeText(this, "لازم توافق على تسجيل الشاشة عشان الترجمة تشتغل", Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        if (requestCode == REQ_CAPTURE) {
+            if (resultCode == Activity.RESULT_OK && data != null) {
+                Intent serviceIntent = new Intent(this, OverlayService.class);
+                serviceIntent.putExtra("resultCode", resultCode);
+                serviceIntent.putExtra("data", data);
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    startForegroundService(serviceIntent);
+                } else {
+                    startService(serviceIntent);
+                }
+                Toast.makeText(this, "بدأت نافذة بيور - اضغط هوم وشوفها فوق أي تطبيق", Toast.LENGTH_LONG).show();
+                finish();
+            } else {
+                statusText.setText("لازم توافق على تسجيل الشاشة عشان الترجمة تشتغل");
+            }
         }
     }
 }

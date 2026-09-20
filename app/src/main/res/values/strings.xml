@@ -6,4 +6,7 @@
     <string name="stop_service">إيقاف</string>
     <string name="notif_title">بيور ترجمة تعمل</string>
     <string name="notif_text">النافذة العائمة تترجم الشاشة الآن</string>
+    <string name="notif_downloading">جاري تحميل موديل الترجمة (يحتاج نت أول مرة بس)…</string>
+    <string name="notif_ready">جاهزة - الترجمة تشتغل الآن</string>
+    <string name="notif_failed">فشل تحميل موديل الترجمة - افتح التطبيق وتأكد من النت وأعد التشغيل</string>
 </resources>

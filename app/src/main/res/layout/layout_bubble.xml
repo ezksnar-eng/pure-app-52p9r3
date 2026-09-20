@@ -1,16 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="56dp"
-    android:layout_height="56dp"
-    android:background="@drawable/bg_bubble">
+    android:layout_width="62dp"
+    android:layout_height="62dp"
+    android:background="@drawable/bg_bubble"
+    android:clipToOutline="true">
 
-    <TextView
+    <ImageView
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:gravity="center"
-        android:text="P"
-        android:textColor="@color/white"
-        android:textSize="22sp"
-        android:textStyle="bold" />
+        android:layout_margin="3dp"
+        android:scaleType="centerCrop"
+        android:src="@drawable/bubble_icon"
+        android:contentDescription="@string/app_name" />
 
 </FrameLayout>

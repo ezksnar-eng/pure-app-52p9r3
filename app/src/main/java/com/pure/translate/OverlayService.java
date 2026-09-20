@@ -10,6 +10,9 @@ import android.content.Intent;
 import android.content.res.Resources;
 import android.graphics.Bitmap;
 import android.graphics.PixelFormat;
+import android.graphics.Typeface;
+import android.util.Log;
+import android.util.TypedValue;
 import android.hardware.display.DisplayManager;
 import android.hardware.display.VirtualDisplay;
 import android.media.Image;
@@ -152,9 +155,45 @@ public class OverlayService extends Service {
                 .setTargetLanguage(TranslateLanguage.ARABIC)
                 .build();
         translator = Translation.getClient(options);
+        updateStatus(getString(R.string.notif_downloading));
+        attemptModelDownload(1);
+    }
+
+    /**
+     * أهم سبب "ما يترجم شي إطلاقاً": موديل الترجمة يحتاج نت عشان ينزل أول مرة (مرة وحدة بس)،
+     * ولو فشل التنزيل (نت ضعيف مثلاً) كان قبل هذا التعديل يضل واقف بدون أي محاولة ثانية أو أي إشعار للمستخدم.
+     * هسه يعيد المحاولة 5 مرات ويحدث الإشعار الثابت بالحالة الحقيقية.
+     */
+    private void attemptModelDownload(int attempt) {
         translator.downloadModelIfNeeded()
-                .addOnSuccessListener(v -> translatorReady = true)
-                .addOnFailureListener(e -> translatorReady = false);
+                .addOnSuccessListener(v -> {
+                    translatorReady = true;
+                    updateStatus(getString(R.string.notif_ready));
+                })
+                .addOnFailureListener(e -> {
+                    translatorReady = false;
+                    Log.w("PureTranslate", "فشل تنزيل موديل الترجمة، محاولة " + attempt, e);
+                    if (attempt < 5) {
+                        updateStatus(getString(R.string.notif_downloading));
+                        handler.postDelayed(() -> attemptModelDownload(attempt + 1), 6000);
+                    } else {
+                        updateStatus(getString(R.string.notif_failed));
+                    }
+                });
+    }
+
+    /** يحدث نص الإشعار الثابت عشان تعرف وضع الترجمة الحقيقي (تنزيل / جاهزة / فشل) بدون ما تفتح التطبيق. */
+    private void updateStatus(String text) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            NotificationManager nm = getSystemService(NotificationManager.class);
+            Notification n = new NotificationCompat.Builder(this, CHANNEL_ID)
+                    .setContentTitle(getString(R.string.notif_title))
+                    .setContentText(text)
+                    .setSmallIcon(android.R.drawable.ic_menu_view)
+                    .setOngoing(true)
+                    .build();
+            nm.notify(NOTIF_ID, n);
+        }
     }
 
     // ---------------------------------------------------------------------
@@ -178,9 +217,16 @@ public class OverlayService extends Service {
                 type,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                         | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
                 PixelFormat.TRANSLUCENT);
         layerParams.gravity = Gravity.TOP | Gravity.START;
+        // هذا يخلي طبقة الترجمة تغطي الشاشة بالكامل من فوق شريط الحالة لين تحت - نفس أبعاد السكرين شوت بالضبط
+        // (بدونه، صندوق الترجمة يطلع مزاح عن مكانه الصحيح بمقدار ارتفاع شريط الحالة)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            layerParams.layoutInDisplayCutoutMode =
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;
+        }
 
         windowManager.addView(translationLayer, layerParams);
     }
@@ -394,50 +440,67 @@ public class OverlayService extends Service {
     }
 
     private void handleOcrResult(Text result) {
-        List<Text.TextBlock> blocks = result.getTextBlocks();
-        translationLayer.removeAllViews();
+        try {
+            List<Text.TextBlock> blocks = result.getTextBlocks();
+            translationLayer.removeAllViews();
 
-        if (blocks.isEmpty() || !translatorReady) {
-            isCapturing = false;
-            return;
-        }
-
-        final int[] remaining = {blocks.size()};
-        for (Text.TextBlock block : blocks) {
-            String original = block.getText();
-            // نتجاهل الكتل القصيرة جداً أو اللي ماكو فيها احرف حقيقية (زي تأثيرات صوتية رمزية بسيطة)
-            if (original.trim().length() < 2) {
-                remaining[0]--;
-                continue;
+            if (blocks.isEmpty() || !translatorReady) {
+                isCapturing = false;
+                return;
             }
-            translator.translate(original)
-                    .addOnSuccessListener(translated -> {
-                        if (block.getBoundingBox() != null) {
-                            addTranslatedBox(block.getBoundingBox(), translated);
-                        }
-                        remaining[0]--;
-                        if (remaining[0] <= 0) isCapturing = false;
-                    })
-                    .addOnFailureListener(e -> {
-                        remaining[0]--;
-                        if (remaining[0] <= 0) isCapturing = false;
-                    });
+
+            final int[] remaining = {blocks.size()};
+            for (Text.TextBlock block : blocks) {
+                String original = block.getText();
+                // نتجاهل الكتل القصيرة جداً أو اللي ماكو فيها احرف حقيقية (زي تأثيرات صوتية رمزية بسيطة)
+                if (original == null || original.trim().length() < 2) {
+                    remaining[0]--;
+                    continue;
+                }
+                translator.translate(original)
+                        .addOnSuccessListener(translated -> {
+                            try {
+                                if (block.getBoundingBox() != null) {
+                                    addTranslatedBox(block.getBoundingBox(), translated);
+                                }
+                            } catch (Exception e) {
+                                Log.w("PureTranslate", "تعذر رسم صندوق الترجمة", e);
+                            }
+                            remaining[0]--;
+                            if (remaining[0] <= 0) isCapturing = false;
+                        })
+                        .addOnFailureListener(e -> {
+                            remaining[0]--;
+                            if (remaining[0] <= 0) isCapturing = false;
+                        });
+            }
+            if (blocks.isEmpty()) isCapturing = false;
+        } catch (Exception e) {
+            // أي خطأ غير متوقع هنا ما لازم يكرش الخدمة كلها (وياها تختفي الفقاعة بالكامل) - بس نتجاهل هذي الدورة
+            Log.e("PureTranslate", "خطأ بمعالجة نتيجة القراءة", e);
+            isCapturing = false;
         }
-        if (blocks.isEmpty()) isCapturing = false;
     }
 
-    /** يرسم صندوق أبيض (تبييض) فوق النص الأصلي وبداخله النص المترجم - بنفس مكان وحجم النص الأصلي تقريباً. */
+    /**
+     * يرسم صندوق أبيض نقي (بدون أي لون وردي حوله) فوق النص الأصلي بالضبط، وبداخله الترجمة بخط أسود عريض
+     * وواضح. حجم الخط يتحسب من ارتفاع النص الأصلي نفسه عشان يبين طبيعي وواثق، مو صغير وباهت.
+     */
     private void addTranslatedBox(android.graphics.Rect rect, String translatedText) {
         TextView box = new TextView(this);
         box.setText(translatedText);
-        box.setBackgroundResource(R.drawable.bg_panel);
-        box.setTextColor(getColor(R.color.ink));
-        box.setTextSize(11);
-        box.setPadding(8, 4, 8, 4);
+        box.setBackgroundResource(R.drawable.bg_whiteout); // أبيض نقي بدون حدود وردية
+        box.setTextColor(0xFF000000);
+        box.setTypeface(Typeface.DEFAULT_BOLD);
         box.setGravity(Gravity.CENTER);
+        box.setPadding(6, 2, 6, 2);
 
+        float textSizePx = Math.max(rect.height() * 0.55f, 26f);
+        box.setTextSize(TypedValue.COMPLEX_UNIT_PX, textSizePx);
+
+        int boxWidth = Math.max(rect.width(), 60);
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
-                Math.max(rect.width(), 80), FrameLayout.LayoutParams.WRAP_CONTENT);
+                boxWidth, FrameLayout.LayoutParams.WRAP_CONTENT);
         lp.leftMargin = rect.left;
         lp.topMargin = rect.top;
         translationLayer.addView(box, lp);
